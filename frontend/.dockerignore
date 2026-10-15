@@ -1,6 +1,9 @@
-node_modules
-.git
+﻿node_modules
 .env
 .env.*
-dist
+!.env.example
+!.env.sample
 *.log
+coverage/
+dist/
+.git

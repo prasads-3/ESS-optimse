@@ -40,3 +40,5 @@ bun.lockb
 .agents/
 scratch/
 tmp/
+.env.*
+!.env.example
