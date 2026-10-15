@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Zoom / DPI compensation ──────────────────────────────────────
+   At 125% browser zoom the effective viewport shrinks to 80% of its
+   real size. Scaling the root font-size down compensates so Tailwind
+   rem-based classes (spacing, text, padding) stay proportional.
+   Base: 16px. At 1.25× zoom we target ~13px effective → 16*0.8=12.8 ≈ 13px.
+────────────────────────────────────────────────────────────────── */
+html {
+  font-size: clamp(13px, 1.35vw, 16px);
+}
+
+/* 125% zoom (1.25 dppx) */
+@media (min-resolution: 1.2dppx) {
+  html {
+    font-size: 13.5px;
+  }
+}
+
+/* 150% zoom (1.5 dppx) */
+@media (min-resolution: 1.45dppx) {
+  html {
+    font-size: 11.5px;
+  }
+}
+
+@layer base {
+  :root {
+    /* === Zinc / Slate base palette === */
+    --background: 240 5% 98%;
+    /* Zinc-50 */
+    --foreground: 240 6% 10%;
+    /* Zinc-900 */
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 6% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 6% 10%;
+
+    --primary: 161 94% 20%;
+    /* Deep Emerald — unchanged */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 5% 96%;
+    /* Zinc-100 */
+    --secondary-foreground: 161 94% 20%;
+
+    --muted: 240 5% 96%;
+    /* Zinc-100 */
+    --muted-foreground: 240 4% 46%;
+    /* Zinc-500 */
+
+    --accent: 161 64% 45%;
+    /* Emerald Green — unchanged */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 240 6% 90%;
+    /* Zinc-200 */
+    --input: 240 6% 90%;
+    --ring: 161 64% 45%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar — zinc-toned */
+    --sidebar-background: 240 5% 97%;
+    /* Zinc-50 slight */
+    --sidebar-foreground: 240 6% 15%;
+    /* Zinc-800 */
+    --sidebar-primary: 161 64% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 93%;
+    /* Zinc-200 light */
+    --sidebar-accent-foreground: 161 94% 20%;
+    --sidebar-border: 240 6% 88%;
+    /* Zinc-200 */
+    --sidebar-ring: 161 64% 45%;
+
+    --success: 161 64% 35%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased selection:bg-primary/10 selection:text-primary;
+    background-color: #F7F7F8;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-semibold tracking-tight text-foreground/90;
+  }
+}
+
+@layer utilities {
+  /* Scrollable but with the scrollbar hidden (used by the sidebar nav). */
+  .custom-scrollbar {
+    -ms-overflow-style: none; /* IE/Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none; /* Chrome/Safari */
+  }
+}
+
+@layer components {
+  .bespoke-border {
+    @apply border border-border/60 hover:border-primary/30 transition-colors;
+  }
+
+  .bespoke-shadow {
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  }
+
+  .card-hover {
+    @apply transition-[transform,box-shadow] duration-300 hover:translate-y-[-2px] hover:shadow-lg active:scale-[0.99];
+  }
+}

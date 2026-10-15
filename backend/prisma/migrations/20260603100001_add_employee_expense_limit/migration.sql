@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Employee" ADD COLUMN "expenseLimit" DOUBLE PRECISION NOT NULL DEFAULT 0;

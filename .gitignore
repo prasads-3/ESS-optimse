@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+.env
+.env.production
+.env.development
+node_modules
+dist
+dist-ssr
+*.local
+
+# Backend runtime dirs (created by multer / tus at runtime)
+uploads-tmp/
+backend/uploads-tmp/
+backend/public/uploads/
+public/uploads/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# SSL Certificates
+certbot/
+
+.vite/
+bun.lockb
+.agents/
+scratch/
+tmp/

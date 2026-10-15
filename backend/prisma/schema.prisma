@@ -1,0 +1,496 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+
+
+
+model Employee {
+  id                   Int             @id @default(autoincrement())
+  organizationId       Int?
+  organization         Organization?   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                 String
+  title                String
+  department           String?
+  team                 String?
+  employmentType       String?
+  status               String?
+  joiningDate          DateTime?
+  location             String?
+  email                String
+  phone                String?
+  emergencyContactName String?
+  emergencyPhone       String?
+  reportsTo            String?
+  reportsToName        String?
+  password             String?
+  photo                String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  linkedin             String?
+  role                 String          @default("user")
+  aadhaar              String?
+  certification        String?
+  dob                  DateTime?
+  hobbies              String?
+  marriedStatus        String?
+  panCard              String?
+  passport             String?
+  isTemporaryPassword  Boolean         @default(false)
+  resetToken           String?
+  resetTokenExpiry     DateTime?
+  employeeId           String
+  personalEmail        String?
+  bankAccount          String?
+  ifsc                 String?
+  bankName             String?
+  bankBranch           String?
+  bankBranchLocation   String?
+  chequeImage          String?
+  // Employee-submitted "other" documents: JSON array of { name, url, uploadedAt }.
+  documents            Json?
+  // DEPRECATED: kept during migration to EmployeeLocation rows (see
+  // prisma/migrations/20260606120000_normalize_location_and_email_json and
+  // scripts/migrate-json-to-tables.js). Do not write new entries; drop the
+  // column once the new write path has been stable for a release.
+  locationHistory      Json            @default("[]")
+  locationRecords      EmployeeLocation[]
+  announcements        Announcement[]
+  expenses             Expense[]       @relation("EmployeeExpenses")
+  leaves               Leave[]         @relation("EmployeeLeaves")
+  loginLogs            LoginLog[]
+  referrals            Referral[]      @relation("Referrer")
+  referralPoints       ReferralPoints? @relation("EmployeePoints")
+  salarySlips          SalarySlip[]
+  trackingLogs         TrackingLog[]
+  expenseLimit         Float           @default(0)
+  asset                String?
+  moneyRequests        MoneyRequest[]
+
+  @@unique([organizationId, email])
+  @@unique([organizationId, employeeId])
+}
+
+model Policy {
+  id             Int           @id @default(autoincrement())
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  category       String
+  version        String
+  content        String?
+  fileSize       String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Holiday {
+  id             Int           @id @default(autoincrement())
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  date           DateTime
+  type           String        @default("Mandatory")
+  location       String        @default("Pan India")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model SalarySlip {
+  id                 Int      @id @default(autoincrement())
+  employeeName       String
+  department         String
+  designation        String
+  month              String
+  year               String
+  basicSalary        Float
+  hra                Float
+  transportAllowance Float
+  medicalAllowance   Float
+  otherAllowance     Float
+  pf                 Float
+  esi                Float
+  professionalTax    Float
+  incomeTax          Float
+  otherDeduction     Float
+  grossEarnings      Float
+  totalDeductions    Float
+  netPay             Float
+  attendanceStatus   String?
+  deductionReason    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  employeeId         Int
+  employeeStrId      String?
+  bankAccount        String?
+  employee           Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model Leave {
+  id         Int       @id @default(autoincrement())
+  type       String
+  startDate  DateTime
+  endDate    DateTime
+  isHalfDay  Boolean   @default(false)
+  reason     String?
+  status     String    @default("Pending")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  employeeId Int?
+  document   String?
+  // Multi-level approval escalation: who must act now, and the audit trail.
+  currentApproverId Int?
+  approvalHistory   Json?
+  employee   Employee? @relation("EmployeeLeaves", fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model Expense {
+  id           Int           @id @default(autoincrement())
+  claimDate    DateTime
+  employeeName String?
+  status       String        @default("Pending")
+  totalAmount  Float
+  receipt      String? // base64 data URL of the receipt image (required for online payments)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  employeeId   Int?
+  // Multi-level approval escalation: who must act now, and the audit trail.
+  currentApproverId Int?
+  approvalHistory   Json?
+  employee     Employee?     @relation("EmployeeExpenses", fields: [employeeId], references: [id], onDelete: Cascade)
+  items        ExpenseItem[]
+}
+
+model ExpenseItem {
+  id          Int     @id @default(autoincrement())
+  expenseId   Int
+  type        String
+  from        String?
+  to          String?
+  via         String?
+  description String?
+  price       Float
+  paymentMode String? // "Cash" | "UPI" | "Card" | "Bank Transfer" | "Online" | null
+  receipt     String? // MinIO URL of this item's receipt (optional, any payment mode)
+  expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+}
+
+model Announcement {
+  id             Int           @id @default(autoincrement())
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  content        String
+  authorId       Int?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  effectiveDate  String?
+  author         Employee?     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+}
+
+model Referral {
+  id            Int      @id @default(autoincrement())
+  referrerId    Int
+  referredName  String
+  referredEmail String
+  referredPhone String?
+  status        String   @default("Pending")
+  points        Int      @default(0)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  referrer      Employee @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+}
+
+model ReferralPoints {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int      @unique
+  points      Int      @default(0)
+  totalEarned Int      @default(0)
+  totalUsed   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  employee    Employee @relation("EmployeePoints", fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model TrackingLog {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  action     String
+  timestamp  DateTime @default(now())
+  latitude   Float?
+  longitude  Float?
+  city       String?
+  area       String?
+  deviceInfo String?
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model Organization {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  slug      String?  @unique
+  industry  String
+  address   String?
+  officeLat Float?
+  officeLong Float?
+  plan      String   @default("Basic")
+  used      Int      @default(0)
+  limit     Int      @default(35)
+  status    String   @default("Active")
+  admin     String
+  logo      String?
+  billingCycle String @default("Monthly")
+  priceOverride Float?
+  startDate DateTime?
+  endDate   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  planId    Int?
+  payslipConfig Json?
+  subscriptionPlan SubscriptionPlan? @relation(fields: [planId], references: [id])
+  customPlanRequests CustomPlanRequest[]
+  employees     Employee[]
+  policies      Policy[]
+  holidays      Holiday[]
+  announcements Announcement[]
+  company       Company?
+  emailBroadcasts EmailBroadcast[]
+}
+
+// Audit/history of org-wide emails fired from the Super Admin panel.
+// One row per broadcast: who/what was sent and per-recipient outcome.
+model EmailBroadcast {
+  id              Int           @id @default(autoincrement())
+  organizationId  Int?
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  adminEmail      String
+  subject         String
+  message         String
+  totalRecipients Int           @default(0)
+  sentCount       Int           @default(0)
+  failedCount     Int           @default(0)
+  // DEPRECATED: recipients/failures kept during migration to EmailRecipient
+  // rows (one row per recipient; a failure is status='failed' + errorMessage
+  // on that row). Drop both columns once the new write path is stable.
+  recipients      Json          @default("[]")
+  failures        Json          @default("[]")
+  sentBy          String?
+  createdAt       DateTime      @default(now())
+  recipientRows   EmailRecipient[]
+
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+// One row per (broadcast, recipient). Replaces EmailBroadcast.recipients and
+// EmailBroadcast.failures JSON arrays: a failure is a STATE of a recipient
+// (status='failed' + errorMessage), not a separate entity, so a single table
+// avoids a join and lets retries update the same row in place.
+model EmailRecipient {
+  id           Int            @id @default(autoincrement())
+  broadcastId  Int
+  email        String
+  status       String         @default("pending") // pending | sent | failed
+  sentAt       DateTime?
+  failedAt     DateTime?
+  errorMessage String?
+  retryCount   Int            @default(0)
+  lastRetryAt  DateTime?
+  createdAt    DateTime       @default(now())
+  broadcast    EmailBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@unique([broadcastId, email])   // idempotent inserts; one row per recipient per broadcast
+  @@index([broadcastId, status])   // "show failures for this broadcast"
+  @@index([status, createdAt])     // global retry queue: oldest failed first
+  @@index([email])                 // delivery history for an address
+}
+
+// Normalized replacement for the append-only Employee.locationHistory JSON
+// array. One row per location ping (login/logout/tracking).
+model EmployeeLocation {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  latitude   Float
+  longitude  Float
+  accuracy   Float?
+  city       String?
+  area       String?
+  address    String?
+  action     String?  // LOGIN | LOGOUT | TRACKING
+  ipAddress  String?
+  deviceType String?
+  deviceInfo String?
+  recordedAt DateTime @default(now()) // when the ping happened (JSON `timestamp`)
+  createdAt  DateTime @default(now()) // when the row was inserted
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, recordedAt(sort: Desc)]) // per-employee timeline, newest first
+  @@index([recordedAt])                         // time-range scans / retention purges
+}
+
+model Company {
+  id             Int           @id @default(autoincrement())
+  name           String
+  logoUrl        String?       @map("logo_url")
+  organizationId Int?          @unique
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@map("company")
+}
+
+model SubscriptionPlan {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  price       Float
+  userLimit   Int
+  features    Json     @default("[]")
+  color       String?  @default("blue")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  organizations Organization[]
+}
+
+model LoginLog {
+  id         Int       @id @default(autoincrement())
+  userId     Int?
+  email      String?
+  ipAddress  String?
+  deviceType String?
+  deviceInfo String?
+  loginLat   Float?
+  loginLong  Float?
+  loginCity  String?
+  loginArea  String?
+  loginTime  DateTime  @default(now())
+  logoutLat  Float?
+  logoutLong Float?
+  logoutCity String?
+  logoutArea String?
+  logoutTime DateTime?
+  employee   Employee? @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model CustomPlanRequest {
+  id             Int          @id @default(autoincrement())
+  organizationId Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users          String
+  duration       String
+  features       String
+  specialReq     String?
+  status         String       @default("Pending") // Pending, Contacted, Completed, Rejected
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  notifications  Notification[]
+}
+
+model Notification {
+  id          Int       @id @default(autoincrement())
+  type        String    // "custom_plan_request", "leave", "expense", "payslip", "announcement"
+  title       String
+  message     String
+  recipientId Int?      // User ID who receives the notification (null for all super-admins)
+  recipientRole String  // "super-admin", "admin", "user"
+  isRead      Boolean   @default(false)
+  link        String?   // Optional link to navigate (e.g., /super-admin/custom-requests)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  customPlanRequestId Int?
+  customPlanRequest CustomPlanRequest? @relation(fields: [customPlanRequestId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id               Int        @id @default(autoincrement())
+  title            String
+  description      String?
+  assignedTo       String
+  assignedBy       String
+  priority         String     @default("Medium")
+  startDate        DateTime
+  endDate          DateTime
+  clientName       String?
+  address          String?
+  expectedDuration String?
+  radius           Int?
+  overallProgress  Int        @default(0)
+  status           String     @default("Pending")
+  createdAt        DateTime   @default(now())
+  weeks            TaskWeek[]
+}
+
+model TaskWeek {
+  id          Int         @id @default(autoincrement())
+  taskId      Int
+  weekNumber  Int
+  startDate   DateTime
+  endDate     DateTime
+  progress    Int         @default(0)
+  status      String      @default("Pending")
+  task        Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  dailyTasks  DailyTask[]
+}
+
+model DailyTask {
+  id          Int       @id @default(autoincrement())
+  weekId      Int
+  dayName     String
+  title       String
+  description String?
+  status      String    @default("Pending")
+  comment     String?
+  completedAt DateTime?
+  week        TaskWeek  @relation(fields: [weekId], references: [id], onDelete: Cascade)
+}
+
+model FieldTask {
+  id               Int       @id @default(autoincrement())
+  title            String
+  description      String?
+  assignedTo       String
+  assignedBy       String
+  clientName       String?
+  address          String?
+  latitude         Float
+  longitude        Float
+  allowedRadius    Int       @default(100)
+  date             DateTime
+  expectedDuration String?
+  status           String    @default("Assigned")
+  checkInTime      DateTime?
+  checkOutTime     DateTime?
+  checkInLat       Float?
+  checkInLng       Float?
+  checkOutLat      Float?
+  checkOutLng      Float?
+  totalDuration    Int?
+  autoCheckout     Boolean   @default(false)
+  notes            String?
+  adminRemark      String?
+  missedReason     String?
+  proofImage       String?
+  organizationId   Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model MoneyRequest {
+  id             Int       @id @default(autoincrement())
+  employeeId     Int
+  organizationId Int?
+  reason         String
+  amount         Float
+  description    String?
+  urgency        String    @default("Normal")
+  status         String    @default("Pending")
+  adminNote      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  // Multi-level approval escalation: who must act now, and the audit trail.
+  currentApproverId Int?
+  approvalHistory   Json?
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
