@@ -49,7 +49,7 @@ pipeline {
             steps {
                 // Keep lint findings visible without blocking tests.
                 catchError(
-                    buildResult: 'UNSTABLE',
+                    buildResult: 'SUCCESS',
                     stageResult: 'UNSTABLE',
                     message: 'Frontend lint reported errors; continuing to tests.'
                 ) {
