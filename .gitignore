@@ -42,3 +42,5 @@ scratch/
 tmp/
 .env.*
 !.env.example
+
+/deploy/staging/staging.env
