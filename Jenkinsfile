@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -118,11 +117,38 @@ pipeline {
 
         stage('Approve Staging Deployment') {
             steps {
-                // Require an explicit approval before creating or updating services.
+                // Require an explicit approval before changing the staging environment.
                 input(
-                    message: 'Deploy ESS as a separate Compose project with new persistent volumes? Existing staging database and uploads will not be reused.',
-                    ok: 'Proceed with deployment'
+                    message: 'Approve the ESS staging deployment and database migrations? Confirm that the target is the isolated staging database and the migration files have been reviewed.',
+                    ok: 'Proceed with staging deployment'
                 )
+            }
+        }
+
+        stage('Apply Database Migrations') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ESS_DEPLOY_ENV',
+                        variable: 'DEPLOY_ENV_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        # Apply pending database migrations before deploying the application.
+                        # Use the environment file stored in Jenkins Credentials.
+                        docker compose \
+                          --project-name ess-optimse-jenkins \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          run --rm backend \
+                          npx prisma migrate deploy \
+                          --schema=/app/prisma/schema.prisma
+
+                        echo "Database migration command completed."
+                    '''
+                }
             }
         }
 
