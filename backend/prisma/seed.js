@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../lib/password.js';
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
+
 
 async function main() {
   const ADMIN_EMAIL = "admin@mirakilabs.com";
@@ -11,7 +11,7 @@ async function main() {
   const existingAdmin = await prisma.employee.findFirst({
     where: {
       email: ADMIN_EMAIL,
-      organizationId: null,
+      organizationId: null
     },
   });
 

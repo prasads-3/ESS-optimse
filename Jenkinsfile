@@ -183,11 +183,37 @@ pipeline {
                 }
             }
         }
+
+        stage('Seed Staging Database') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ESS_DEPLOY_ENV',
+                        variable: 'DEPLOY_ENV_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        # Create the staging admin if it does not exist.
+                        # Also ensure the subscription plans are available.
+                        docker compose \
+                          --project-name ess-optimse-jenkins \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          run --rm backend \
+                          node prisma/seed.js
+
+                        echo "Staging database seeding completed."
+                    '''
+                }
+            }
+        }
     }
 
     post {
         success {
-            echo 'Pipeline completed. Review the deployment output and service status.'
+            echo 'Pipeline completed. Review deployment output and service status.'
         }
 
         failure {
