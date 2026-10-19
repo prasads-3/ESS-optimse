@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -14,6 +15,20 @@ pipeline {
             steps {
                 // Get the code from the repository and branch configured in Jenkins.
                 checkout scm
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    // Use the SonarScanner installation configured in Jenkins Tools.
+                    def scannerHome = tool 'SonarScanner'
+
+                    // Connect to the configured SonarQube server and run the scan.
+                    withSonarQubeEnv('SonarQube') {
+                        sh "${scannerHome}/bin/sonar-scanner"
+                    }
+                }
             }
         }
 
