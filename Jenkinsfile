@@ -4,9 +4,8 @@ pipeline {
 
     options {
         timestamps()
-        // Prevent concurrent builds from deploying to the same environment.
         disableConcurrentBuilds()
-        timeout(time: 60, unit: 'MINUTES')
+        timeout(time: 15, unit: 'MINUTES')
         skipDefaultCheckout(true)
     }
 
@@ -17,197 +16,71 @@ pipeline {
             }
         }
 
-        stage('SonarQube Analysis') {
-            steps {
-                script {
-                    def scannerHome = tool 'SonarScanner'
-
-                    withSonarQubeEnv(
-                        installationName: 'SonarQube',
-                        credentialsId: 'sonarqube-token',
-                        envOnly: true
-                    ) {
-                        // Use the token injected by Jenkins as SONAR_TOKEN.
-                        // Avoid injecting the legacy sonar.login property.
-                        withEnv(["SONAR_TOKEN=${env.SONAR_AUTH_TOKEN}"]) {
-                            sh """
-                                set -eu
-                                test -n "\$SONAR_TOKEN"
-                                "${scannerHome}/bin/sonar-scanner"
-                            """
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Preflight') {
-            steps {
-                sh '''
-                    set -eu
-                    docker --version
-                    docker compose version
-                    docker info >/dev/null
-
-                    test -f compose.yaml
-                    test -f backend/Dockerfile
-                    test -f frontend/Dockerfile
-
-                    echo "Preflight checks passed."
-                '''
-            }
-        }
-
-        stage('Validate Compose') {
+        stage('SonarQube Auth Diagnostic') {
             steps {
                 withCredentials([
-                    file(
-                        credentialsId: 'ESS_DEPLOY_ENV',
-                        variable: 'DEPLOY_ENV_FILE'
+                    string(
+                        credentialsId: 'sonarqube-token',
+                        variable: 'SQ_TOKEN'
                     )
                 ]) {
                     sh '''
+                        set +x
                         set -eu
-                        docker compose \
-                          --project-name ess-optimse-jenkins \
-                          --file compose.yaml \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          config -q
+                        umask 077
 
-                        echo "Compose configuration is valid."
-                    '''
-                }
-            }
-        }
+                        TMP_DIR="$(mktemp -d)"
+                        trap 'rm -rf "$TMP_DIR"' EXIT
 
-        stage('Check Deployment Ports') {
-            steps {
-                sh '''
-                    set -eu
-                    PROJECT="ess-optimse-jenkins"
+                        # Keep the token in a temporary, restricted file.
+                        # Never print the token to the Jenkins console.
+                        printf 'header = "Authorization: Bearer %s"\\n' \
+                            "$SQ_TOKEN" > "$TMP_DIR/curl.conf"
 
-                    for port in 18082 13001 15433 19000 19001; do
-                        conflicts="$(
-                            docker ps --format '{{.Names}} {{.Ports}}' \
-                              | grep -E "(:${port}(-[0-9]+)?->)" \
-                              | grep -v "^${PROJECT}-" \
-                              || true
+                        echo "Checking SonarQube token..."
+
+                        VALIDATE_STATUS="$(
+                            curl --silent --show-error \
+                                --config "$TMP_DIR/curl.conf" \
+                                --output "$TMP_DIR/validate.json" \
+                                --write-out '%{http_code}' \
+                                'https://sonar.miraki.in/api/authentication/validate'
                         )"
 
-                        if [ -n "$conflicts" ]; then
-                            echo "ERROR: Port $port is already published:"
-                            printf '%s\\n' "$conflicts"
-                            echo "Stopping to avoid a port conflict."
+                        echo "Token validation HTTP status: $VALIDATE_STATUS"
+                        echo "Validation response:"
+                        cat "$TMP_DIR/validate.json"
+                        echo
+
+                        echo "Checking authenticated server-version endpoint..."
+
+                        VERSION_STATUS="$(
+                            curl --silent --show-error \
+                                --config "$TMP_DIR/curl.conf" \
+                                --output "$TMP_DIR/version.txt" \
+                                --write-out '%{http_code}' \
+                                'https://sonar.miraki.in/api/server/version'
+                        )"
+
+                        echo "Authenticated server-version HTTP status: $VERSION_STATUS"
+
+                        if [ "$VALIDATE_STATUS" != "200" ]; then
+                            echo "RESULT: Token validation request failed."
                             exit 1
                         fi
-                    done
 
-                    echo "No conflicts found on the configured ESS staging ports."
-                '''
-            }
-        }
+                        if ! grep -Eq '"valid"[[:space:]]*:[[:space:]]*true' \
+                            "$TMP_DIR/validate.json"; then
+                            echo "RESULT: SonarQube did not confirm this token as valid."
+                            exit 1
+                        fi
 
-        stage('Build Docker Images') {
-            steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'ESS_DEPLOY_ENV',
-                        variable: 'DEPLOY_ENV_FILE'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-                        docker compose \
-                          --project-name ess-optimse-jenkins \
-                          --file compose.yaml \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          build backend frontend
+                        if [ "$VERSION_STATUS" != "200" ]; then
+                            echo "RESULT: Token is valid, but the version endpoint returned a non-200 status."
+                            exit 1
+                        fi
 
-                        echo "Docker image build completed."
-                    '''
-                }
-            }
-        }
-
-        stage('Approve Staging Deployment') {
-            steps {
-                input(
-                    message: 'Approve the ESS staging deployment and database migrations? Confirm that the target is the isolated staging database and the migration files have been reviewed.',
-                    ok: 'Proceed with staging deployment'
-                )
-            }
-        }
-
-        stage('Apply Database Migrations') {
-            steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'ESS_DEPLOY_ENV',
-                        variable: 'DEPLOY_ENV_FILE'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-                        docker compose \
-                          --project-name ess-optimse-jenkins \
-                          --file compose.yaml \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          run --rm backend \
-                          npx prisma migrate deploy \
-                          --schema=/app/prisma/schema.prisma
-
-                        echo "Database migration command completed."
-                    '''
-                }
-            }
-        }
-
-        stage('Deploy ESS') {
-            steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'ESS_DEPLOY_ENV',
-                        variable: 'DEPLOY_ENV_FILE'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-                        PROJECT="ess-optimse-jenkins"
-
-                        docker compose \
-                          --project-name "$PROJECT" \
-                          --file compose.yaml \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          up -d --no-build
-
-                        docker compose \
-                          --project-name "$PROJECT" \
-                          --file compose.yaml \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          ps
-                    '''
-                }
-            }
-        }
-
-        stage('Seed Staging Database') {
-            steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'ESS_DEPLOY_ENV',
-                        variable: 'DEPLOY_ENV_FILE'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-                        docker compose \
-                          --project-name ess-optimse-jenkins \
-                          --file compose.yaml \
-                          --env-file "$DEPLOY_ENV_FILE" \
-                          run --rm backend \
-                          node prisma/seed.js
-
-                        echo "Staging database seeding completed."
+                        echo "RESULT: Token validated and authenticated version endpoint returned HTTP 200."
                     '''
                 }
             }
@@ -216,15 +89,15 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed. Review deployment output and service status.'
+            echo 'SonarQube authentication diagnostic passed.'
         }
 
         failure {
-            echo 'Pipeline failed. Check Console Output before retrying.'
+            echo 'SonarQube authentication diagnostic failed. Review the HTTP statuses above.'
         }
 
         always {
-            echo 'ESS pipeline finished.'
+            echo 'Diagnostic finished. No application deployment was performed.'
         }
     }
 }
