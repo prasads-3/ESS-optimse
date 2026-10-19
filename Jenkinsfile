@@ -1,9 +1,10 @@
+
 pipeline {
     agent any
 
     options {
         timestamps()
-        // Avoid two builds deploying to the same environment at once.
+        // Prevent concurrent builds from deploying to the same environment.
         disableConcurrentBuilds()
         timeout(time: 60, unit: 'MINUTES')
         skipDefaultCheckout(true)
@@ -12,7 +13,6 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                // Get the code from the repository and branch configured in Jenkins.
                 checkout scm
             }
         }
@@ -20,24 +20,21 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    // Use the SonarScanner installation configured in Jenkins Tools.
                     def scannerHome = tool 'SonarScanner'
 
-                    // Load SonarQube connection settings and the configured Jenkins token.
-                    withSonarQubeEnv('SonarQube') {
-                        // SonarScanner CLI expects the token in SONAR_TOKEN.
+                    withSonarQubeEnv(
+                        installationName: 'SonarQube',
+                        credentialsId: 'sonarqube-token',
+                        envOnly: true
+                    ) {
+                        // Use the token injected by Jenkins as SONAR_TOKEN.
+                        // Avoid injecting the legacy sonar.login property.
                         withEnv(["SONAR_TOKEN=${env.SONAR_AUTH_TOKEN}"]) {
-                            sh '''
+                            sh """
                                 set -eu
-
-                                if [ -z "${SONAR_TOKEN:-}" ]; then
-                                    echo "ERROR: SonarQube token was not provided."
-                                    echo "Check the SonarQube server credentials in Jenkins."
-                                    exit 1
-                                fi
-                            '''
-
-                            sh "${scannerHome}/bin/sonar-scanner"
+                                test -n "\$SONAR_TOKEN"
+                                "${scannerHome}/bin/sonar-scanner"
+                            """
                         }
                     }
                 }
@@ -48,13 +45,10 @@ pipeline {
             steps {
                 sh '''
                     set -eu
-
-                    # Confirm that this Jenkins agent can access Docker.
                     docker --version
                     docker compose version
                     docker info >/dev/null
 
-                    # Make sure the application files needed for the build exist.
                     test -f compose.yaml
                     test -f backend/Dockerfile
                     test -f frontend/Dockerfile
@@ -74,8 +68,6 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-
-                        # Validate the rendered configuration without starting services.
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -92,11 +84,8 @@ pipeline {
             steps {
                 sh '''
                     set -eu
-
                     PROJECT="ess-optimse-jenkins"
 
-                    # These are the default host ports in compose.yaml.
-                    # Keep this list in sync if the port configuration changes.
                     for port in 18082 13001 15433 19000 19001; do
                         conflicts="$(
                             docker ps --format '{{.Names}} {{.Ports}}' \
@@ -106,9 +95,9 @@ pipeline {
                         )"
 
                         if [ -n "$conflicts" ]; then
-                            echo "ERROR: Port $port is already published by another container:"
+                            echo "ERROR: Port $port is already published:"
                             printf '%s\\n' "$conflicts"
-                            echo "Deployment stopped to avoid a port conflict."
+                            echo "Stopping to avoid a port conflict."
                             exit 1
                         fi
                     done
@@ -128,8 +117,6 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-
-                        # Build the application images using the current source.
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -144,7 +131,6 @@ pipeline {
 
         stage('Approve Staging Deployment') {
             steps {
-                // Require an explicit approval before changing the staging environment.
                 input(
                     message: 'Approve the ESS staging deployment and database migrations? Confirm that the target is the isolated staging database and the migration files have been reviewed.',
                     ok: 'Proceed with staging deployment'
@@ -162,9 +148,6 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-
-                        # Apply pending database migrations before deploying the application.
-                        # Use the environment file stored in Jenkins Credentials.
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -189,18 +172,14 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-
                         PROJECT="ess-optimse-jenkins"
 
-                        # Start the services from the images built in this pipeline.
-                        # The separate project name keeps its volumes separate too.
                         docker compose \
                           --project-name "$PROJECT" \
                           --file compose.yaml \
                           --env-file "$DEPLOY_ENV_FILE" \
                           up -d --no-build
 
-                        # Show the resulting service status in the Jenkins log.
                         docker compose \
                           --project-name "$PROJECT" \
                           --file compose.yaml \
@@ -221,9 +200,6 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-
-                        # Create the staging admin if it does not exist.
-                        # Also ensure the subscription plans are available.
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
