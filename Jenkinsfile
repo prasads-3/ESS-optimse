@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -24,9 +23,22 @@ pipeline {
                     // Use the SonarScanner installation configured in Jenkins Tools.
                     def scannerHome = tool 'SonarScanner'
 
-                    // Connect to the configured SonarQube server and run the scan.
+                    // Load SonarQube connection settings and the configured Jenkins token.
                     withSonarQubeEnv('SonarQube') {
-                        sh "${scannerHome}/bin/sonar-scanner"
+                        // SonarScanner CLI expects the token in SONAR_TOKEN.
+                        withEnv(["SONAR_TOKEN=${env.SONAR_AUTH_TOKEN}"]) {
+                            sh '''
+                                set -eu
+
+                                if [ -z "${SONAR_TOKEN:-}" ]; then
+                                    echo "ERROR: SonarQube token was not provided."
+                                    echo "Check the SonarQube server credentials in Jenkins."
+                                    exit 1
+                                fi
+                            '''
+
+                            sh "${scannerHome}/bin/sonar-scanner"
+                        }
                     }
                 }
             }
