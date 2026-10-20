@@ -3,8 +3,9 @@ pipeline {
 
     options {
         timestamps()
+        // Prevent concurrent builds from deploying to the same environment.
         disableConcurrentBuilds()
-        timeout(time: 15, unit: 'MINUTES')
+        timeout(time: 60, unit: 'MINUTES')
         skipDefaultCheckout(true)
     }
 
@@ -15,104 +16,197 @@ pipeline {
             }
         }
 
-        stage('SonarQube HTTP Diagnostic - No Deployment') {
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    def scannerHome = tool 'SonarScanner'
+
+                    withSonarQubeEnv(
+                        installationName: 'SonarQube',
+                        credentialsId: 'sonarqube-token',
+                        envOnly: true
+                    ) {
+                        // Use the token injected by Jenkins as SONAR_TOKEN.
+                        // Avoid injecting the legacy sonar.login property.
+                        withEnv(["SONAR_TOKEN=${env.SONAR_AUTH_TOKEN}"]) {
+                            sh """
+                                set -eu
+                                test -n "\$SONAR_TOKEN"
+                                "${scannerHome}/bin/sonar-scanner"
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Preflight') {
+            steps {
+                sh '''
+                    set -eu
+                    docker --version
+                    docker compose version
+                    docker info >/dev/null
+
+                    test -f compose.yaml
+                    test -f backend/Dockerfile
+                    test -f frontend/Dockerfile
+
+                    echo "Preflight checks passed."
+                '''
+            }
+        }
+
+        stage('Validate Compose') {
             steps {
                 withCredentials([
-                    string(
-                        credentialsId: 'sonarqube-token',
-                        variable: 'SQ_TOKEN'
+                    file(
+                        credentialsId: 'ESS_DEPLOY_ENV',
+                        variable: 'DEPLOY_ENV_FILE'
                     )
                 ]) {
                     sh '''
-                        set +x
-                        umask 077
+                        set -eu
+                        docker compose \
+                          --project-name ess-optimse-jenkins \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          config -q
 
-                        TMP_DIR="$(mktemp -d)"
-                        trap 'rm -rf "$TMP_DIR"' EXIT
+                        echo "Compose configuration is valid."
+                    '''
+                }
+            }
+        }
 
-                        SERVER_URL="https://sonar.miraki.in"
-                        VERSION_URL="$SERVER_URL/api/server/version"
-                        VALIDATE_URL="$SERVER_URL/api/authentication/validate"
+        stage('Check Deployment Ports') {
+            steps {
+                sh '''
+                    set -eu
+                    PROJECT="ess-optimse-jenkins"
 
-                        echo "======================================"
-                        echo "TEST 1: Version endpoint WITHOUT token"
-                        echo "======================================"
+                    for port in 18082 13001 15433 19000 19001; do
+                        conflicts="$(
+                            docker ps --format '{{.Names}} {{.Ports}}' \
+                              | grep -E "(:${port}(-[0-9]+)?->)" \
+                              | grep -v "^${PROJECT}-" \
+                              || true
+                        )"
 
-                        NOAUTH_STATUS="$(curl \
-                            --silent --show-error \
-                            --connect-timeout 10 \
-                            --max-time 20 \
-                            --output "$TMP_DIR/no-auth-body" \
-                            --write-out '%{http_code}' \
-                            "$VERSION_URL")"
-                        NOAUTH_EXIT=$?
-
-                        echo "HTTP status: $NOAUTH_STATUS"
-                        echo "curl exit code: $NOAUTH_EXIT"
-                        echo "Response (first 200 characters):"
-                        head -c 200 "$TMP_DIR/no-auth-body" 2>/dev/null || true
-                        echo
-                        echo
-
-                        echo "======================================"
-                        echo "TEST 2: Token validation endpoint"
-                        echo "======================================"
-
-                        if [ -z "${SQ_TOKEN:-}" ]; then
-                            echo "ERROR: Jenkins credential is empty."
+                        if [ -n "$conflicts" ]; then
+                            echo "ERROR: Port $port is already published:"
+                            printf '%s\\n' "$conflicts"
+                            echo "Stopping to avoid a port conflict."
                             exit 1
                         fi
+                    done
 
-                        printf 'header = "Authorization: Bearer %s"\\n' \
-                            "$SQ_TOKEN" > "$TMP_DIR/curl.conf"
+                    echo "No conflicts found on the configured ESS staging ports."
+                '''
+            }
+        }
 
-                        VALIDATE_STATUS="$(curl \
-                            --silent --show-error \
-                            --connect-timeout 10 \
-                            --max-time 20 \
-                            --config "$TMP_DIR/curl.conf" \
-                            --output "$TMP_DIR/validate-body" \
-                            --write-out '%{http_code}' \
-                            "$VALIDATE_URL")"
-                        VALIDATE_EXIT=$?
+        stage('Build Docker Images') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ESS_DEPLOY_ENV',
+                        variable: 'DEPLOY_ENV_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        docker compose \
+                          --project-name ess-optimse-jenkins \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          build backend frontend
 
-                        echo "HTTP status: $VALIDATE_STATUS"
-                        echo "curl exit code: $VALIDATE_EXIT"
-                        echo "Response (first 200 characters):"
-                        head -c 200 "$TMP_DIR/validate-body" 2>/dev/null || true
-                        echo
-                        echo
+                        echo "Docker image build completed."
+                    '''
+                }
+            }
+        }
 
-                        echo "======================================"
-                        echo "TEST 3: Version endpoint WITH token"
-                        echo "======================================"
+        stage('Approve Staging Deployment') {
+            steps {
+                input(
+                    message: 'Approve the ESS staging deployment and database migrations? Confirm that the target is the isolated staging database and the migration files have been reviewed.',
+                    ok: 'Proceed with staging deployment'
+                )
+            }
+        }
 
-                        AUTH_STATUS="$(curl \
-                            --silent --show-error \
-                            --connect-timeout 10 \
-                            --max-time 20 \
-                            --config "$TMP_DIR/curl.conf" \
-                            --output "$TMP_DIR/auth-body" \
-                            --write-out '%{http_code}' \
-                            "$VERSION_URL")"
-                        AUTH_EXIT=$?
+        stage('Apply Database Migrations') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ESS_DEPLOY_ENV',
+                        variable: 'DEPLOY_ENV_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        docker compose \
+                          --project-name ess-optimse-jenkins \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          run --rm backend \
+                          npx prisma migrate deploy \
+                          --schema=/app/prisma/schema.prisma
 
-                        echo "HTTP status: $AUTH_STATUS"
-                        echo "curl exit code: $AUTH_EXIT"
-                        echo "Response (first 200 characters):"
-                        head -c 200 "$TMP_DIR/auth-body" 2>/dev/null || true
-                        echo
-                        echo
+                        echo "Database migration command completed."
+                    '''
+                }
+            }
+        }
 
-                        echo "======================================"
-                        echo "DIAGNOSTIC RESULTS"
-                        echo "======================================"
-                        echo "Version without token: $NOAUTH_STATUS"
-                        echo "Token validation:      $VALIDATE_STATUS"
-                        echo "Version with token:    $AUTH_STATUS"
-                        echo
-                        echo "Diagnostic run finished."
-                        echo "No application deployment was performed."
+        stage('Deploy ESS') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ESS_DEPLOY_ENV',
+                        variable: 'DEPLOY_ENV_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        PROJECT="ess-optimse-jenkins"
+
+                        docker compose \
+                          --project-name "$PROJECT" \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          up -d --no-build
+
+                        docker compose \
+                          --project-name "$PROJECT" \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          ps
+                    '''
+                }
+            }
+        }
+
+        stage('Seed Staging Database') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'ESS_DEPLOY_ENV',
+                        variable: 'DEPLOY_ENV_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        docker compose \
+                          --project-name ess-optimse-jenkins \
+                          --file compose.yaml \
+                          --env-file "$DEPLOY_ENV_FILE" \
+                          run --rm backend \
+                          node prisma/seed.js
+
+                        echo "Staging database seeding completed."
                     '''
                 }
             }
@@ -121,15 +215,15 @@ pipeline {
 
     post {
         success {
-            echo 'Diagnostic completed. Review the HTTP status codes in Console Output.'
+            echo 'Pipeline completed. Review deployment output and service status.'
         }
 
         failure {
-            echo 'Diagnostic could not complete. Review Console Output.'
+            echo 'Pipeline failed. Check Console Output before retrying.'
         }
 
         always {
-            echo 'Diagnostic pipeline finished. No application deployment was performed.'
+            echo 'ESS pipeline finished.'
         }
     }
 }
