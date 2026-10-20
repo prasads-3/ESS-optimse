@@ -21,18 +21,41 @@ pipeline {
                 script {
                     def scannerHome = tool 'SonarScanner'
 
-                    withSonarQubeEnv(
-                        installationName: 'SonarQube',
-                        credentialsId: 'sonarqube-token',
-                        envOnly: true
-                    ) {
-                        // Use the token injected by Jenkins as SONAR_TOKEN.
-                        // Avoid injecting the legacy sonar.login property.
-                        withEnv(["SONAR_TOKEN=${env.SONAR_AUTH_TOKEN}"]) {
+                    withCredentials([
+                        file(
+                            credentialsId: 'ESS_SONAR_CONFIG',
+                            variable: 'SONAR_CONFIG_FILE'
+                        )
+                    ]) {
+                        withSonarQubeEnv(
+                            installationName: 'SonarQube',
+                            credentialsId: 'sonarqube-token',
+                            envOnly: true
+                        ) {
                             sh """
                                 set -eu
-                                test -n "\$SONAR_TOKEN"
-                                "${scannerHome}/bin/sonar-scanner"
+
+                                normalized_config=\$(mktemp)
+                                trap 'rm -f "\$normalized_config"' EXIT
+
+                                # Normalize Windows line endings before loading config.
+                                sed 's/\\r\$//' "\$SONAR_CONFIG_FILE" > "\$normalized_config"
+
+                                . "\$normalized_config"
+
+                                # Confirm required values exist without printing them.
+                                test -n "\$SONAR_HOST_URL"
+                                test -n "\$SONAR_PROJECT_KEY"
+                                test -n "\$SONAR_SOURCES"
+                                test -n "\$SONAR_AUTH_TOKEN"
+
+                                # Use the token provided by Jenkins credentials.
+                                export SONAR_TOKEN="\$SONAR_AUTH_TOKEN"
+
+                                "${scannerHome}/bin/sonar-scanner" \
+                                  -Dsonar.host.url="\$SONAR_HOST_URL" \
+                                  -Dsonar.projectKey="\$SONAR_PROJECT_KEY" \
+                                  -Dsonar.sources="\$SONAR_SOURCES"
                             """
                         }
                     }
