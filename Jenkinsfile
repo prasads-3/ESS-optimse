@@ -16,6 +16,25 @@ pipeline {
             }
         }
 
+        // QA: Run frontend checks before SonarQube and deployment.
+        stage('QA - Frontend Checks') {
+            steps {
+                sh '''
+                    set -eu
+
+                    docker run --rm \
+                      --user "$(id -u):$(id -g)" \
+                      -e npm_config_cache=/tmp/npm-cache \
+                      -v "$WORKSPACE/frontend:/app" \
+                      -w /app \
+                      node:22-alpine \
+                      sh -lc 'npm ci && npm run lint && npm test && npm run build'
+
+                    echo "QA checks passed."
+                '''
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
                 script {
