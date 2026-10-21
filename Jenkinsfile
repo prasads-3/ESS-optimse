@@ -28,9 +28,28 @@ pipeline {
                       -v "$WORKSPACE/frontend:/app" \
                       -w /app \
                       node:22-alpine \
-                      sh -lc 'npm ci && npm run lint && npm test && npm run build'
+                      sh -lc '
+                        set -e
+                        npm ci
 
-                    echo "QA checks passed."
+                        qa_failed=0
+
+                        echo "===== LINT ====="
+                        npm run lint || qa_failed=1
+
+                        echo "===== AUTOMATED TESTS ====="
+                        npm test || qa_failed=1
+
+                        echo "===== FRONTEND BUILD ====="
+                        npm run build || qa_failed=1
+
+                        if [ "$qa_failed" -ne 0 ]; then
+                          echo "QA FAILED: one or more checks failed."
+                          exit 1
+                        fi
+
+                        echo "All QA checks passed."
+                      '
                 '''
             }
         }
