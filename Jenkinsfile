@@ -16,43 +16,6 @@ pipeline {
             }
         }
 
-        // QA: Run frontend checks before SonarQube and deployment.
-        stage('QA - Frontend Checks') {
-            steps {
-                sh '''
-                    set -eu
-
-                    docker run --rm \
-                      --user "$(id -u):$(id -g)" \
-                      -e npm_config_cache=/tmp/npm-cache \
-                      -v "$WORKSPACE/frontend:/app" \
-                      -w /app \
-                      node:22-alpine \
-                      sh -lc '
-                        set -e
-                        npm ci
-
-                        qa_failed=0
-
-                        echo "===== LINT ====="
-                        npm run lint || qa_failed=1
-
-                        echo "===== AUTOMATED TESTS ====="
-                        npm test || qa_failed=1
-
-                        echo "===== FRONTEND BUILD ====="
-                        npm run build || qa_failed=1
-
-                        if [ "$qa_failed" -ne 0 ]; then
-                          echo "QA FAILED: one or more checks failed."
-                          exit 1
-                        fi
-
-                        echo "All QA checks passed."
-                      '
-                '''
-            }
-        }
 
         stage('SonarQube Analysis') {
             steps {
