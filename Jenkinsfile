@@ -72,65 +72,64 @@ pipeline {
             }
         }
 
-        stage('SonarQube Issue Report') {
-            steps {
-                catchError(
-                    buildResult: 'UNSTABLE',
-                    stageResult: 'UNSTABLE'
-                ) {
-                    withCredentials([
-                        file(
-                            credentialsId: 'ESS_SONAR_CONFIG',
-                            variable: 'SONAR_CONFIG_FILE'
-                        )
-                    ]) {
-                        sh '''
-                            set -eu
-                            set +x
+          stage('SonarQube Issue Report') {
+    steps {
+        catchError(
+            buildResult: 'UNSTABLE',
+            stageResult: 'UNSTABLE'
+        ) {
+            withCredentials([
+                string(
+                    credentialsId: 'sonarqube-token',
+                    variable: 'JENKINS_SONAR_TOKEN'
+                ),
+                file(
+                    credentialsId: 'ESS_SONAR_CONFIG',
+                    variable: 'SONAR_CONFIG_FILE'
+                )
+            ]) {
+                sh '''
+                    set -eu
+                    set +x
 
-                            test -f sonarqube_report.py
-                            command -v python3 >/dev/null
+                    test -f sonarqube_report.py
+                    command -v python3 >/dev/null
 
-                            config=$(mktemp)
-                            trap 'rm -f "$config"' EXIT
+                    config=$(mktemp)
+                    trap 'rm -f "$config"' EXIT
 
-                            sed 's/\\r$//' "$SONAR_CONFIG_FILE" > "$config"
-                            . "$config"
+                    sed 's/\\r$//' "$SONAR_CONFIG_FILE" > "$config"
+                    . "$config"
 
-                            : "${SONAR_HOST_URL:?SonarQube URL is missing}"
-                            : "${SONAR_PROJECT_KEY:?Project key is missing}"
-                            : "${SONAR_AUTH_TOKEN:?SonarQube token is missing}"
+                    : "${SONAR_HOST_URL:?SonarQube URL missing}"
+                    : "${SONAR_PROJECT_KEY:?Project key missing}"
 
-                            if [ "$SONAR_PROJECT_KEY" != "ess-optimse" ]; then
-                                echo "ERROR: Report project key mismatch."
-                                exit 1
-                            fi
+                    if [ "$SONAR_PROJECT_KEY" != "ess-optimse" ]; then
+                        echo "ERROR: Unexpected project key."
+                        exit 1
+                    fi
 
-                            export SONAR_HOST_URL
-                            export SONAR_PROJECT_KEY
-                            export SONAR_AUTH_TOKEN
+                    # Use the Jenkins credential explicitly.
+                    export SONAR_AUTH_TOKEN="$JENKINS_SONAR_TOKEN"
 
-                            python3 sonarqube_report.py
+                    python3 sonarqube_report.py
+                    test -s sonarqube-issues-report.html
 
-                            test -s sonarqube-issues-report.html
+                    echo "SonarQube report generated."
+                '''
 
-                            echo "SonarQube HTML report generated."
-                        '''
-
-                        emailext(
-                            to: 'prasad@mirakilabs.com',
-                            from: 'no-reply@support.miraki.in',
-                            replyTo: 'no-reply@support.miraki.in',
-                            subject: "[SonarQube Report] ESS Optimse - Build #${env.BUILD_NUMBER}",
-                            mimeType: 'text/html',
-                            body: readFile('sonarqube-issues-report.html')
-                        )
-
-                        echo 'SonarQube report email sent to the configured recipient.'
-                    }
-                }
+                emailext(
+                    to: 'prasad@mirakilabs.com',
+                    from: 'no-reply@support.miraki.in',
+                    replyTo: 'no-reply@support.miraki.in',
+                    subject: "[SonarQube Report] ESS Optimse - Build #${env.BUILD_NUMBER}",
+                    mimeType: 'text/html',
+                    body: readFile('sonarqube-issues-report.html')
+                )
             }
         }
+    }
+}
 
         stage('Preflight') {
             steps {
