@@ -109,10 +109,15 @@ pipeline {
                         exit 1
                     fi
 
-                    # Use the Jenkins credential explicitly.
-                    export SONAR_AUTH_TOKEN="$JENKINS_SONAR_TOKEN"
-
-                    python3 sonarqube_report.py
+                    # Pass the configuration values to Python.
+                        export SONAR_HOST_URL
+                        export SONAR_PROJECT_KEY
+                        export SONAR_AUTH_TOKEN="$JENKINS_SONAR_TOKEN"
+                        
+                        python3 sonarqube_report.py
+                        test -s sonarqube-issues-report.html
+                        
+                        echo "SonarQube report generated successfully."
                     test -s sonarqube-issues-report.html
 
                     echo "SonarQube report generated."
