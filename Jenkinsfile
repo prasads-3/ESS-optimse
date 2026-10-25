@@ -1,11 +1,12 @@
+
 pipeline {
     agent any
 
     parameters {
         booleanParam(
             name: 'EMAIL_TEST_ONLY',
-            defaultValue: true,
-            description: 'Checked = test email only. Unchecked = full ESS pipeline and staging deployment.'
+            defaultValue: false,
+            description: 'Checked = test email only. Unchecked = full ESS staging pipeline.'
         )
     }
 
@@ -17,12 +18,6 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
         stage('Email Connectivity Test') {
             when {
                 expression { params.EMAIL_TEST_ONLY == true }
@@ -37,18 +32,23 @@ pipeline {
                     body: """
 Hello,
 
-This is a Jenkins email connectivity test for ESS Optimse.
+This is a Jenkins SMTP connectivity test.
 
-Jenkins build: ${env.BUILD_NUMBER}
 Job: ${env.JOB_NAME}
-Mode: Email test only
+Build: ${env.BUILD_NUMBER}
 
-No ESS deployment stages were executed.
-
-Regards,
-Jenkins
+Test mode only. No deployment stages were executed.
 """
                 )
+            }
+        }
+
+        stage('Checkout') {
+            when {
+                expression { params.EMAIL_TEST_ONLY == false }
+            }
+            steps {
+                checkout scm
             }
         }
 
@@ -60,46 +60,53 @@ Jenkins
                 script {
                     def scannerHome = tool 'SonarScanner'
 
-                    withCredentials([
-                        file(
-                            credentialsId: 'ESS_SONAR_CONFIG',
-                            variable: 'SONAR_CONFIG_FILE'
-                        )
-                    ]) {
-                        withSonarQubeEnv(
-                            installationName: 'SonarQube',
-                            credentialsId: 'sonarqube-token',
-                            envOnly: true
-                        ) {
-                            sh """
-                                set -eu
-                                set +x
+                    withEnv(["SCANNER_HOME=${scannerHome}"]) {
+                        withCredentials([
+                            file(
+                                credentialsId: 'ESS_SONAR_CONFIG',
+                                variable: 'SONAR_CONFIG_FILE'
+                            )
+                        ]) {
+                            withSonarQubeEnv(
+                                installationName: 'SonarQube',
+                                credentialsId: 'sonarqube-token',
+                                envOnly: true
+                            ) {
+                                sh '''
+                                    set -eu
+                                    set +x
 
-                                normalized_config=\\$(mktemp)
-                                trap 'rm -f "\\$normalized_config"' EXIT
+                                    config=$(mktemp)
+                                    trap 'rm -f "$config"' EXIT
 
-                                sed 's/\\r\\$//' "\\$SONAR_CONFIG_FILE" > "\\$normalized_config"
-                                . "\\$normalized_config"
+                                    sed 's/\\r$//' "$SONAR_CONFIG_FILE" > "$config"
+                                    . "$config"
 
-                                test -n "\\$SONAR_HOST_URL"
-                                test -n "\\$SONAR_PROJECT_KEY"
-                                test -n "\\$SONAR_SOURCES"
-                                test -n "\\$SONAR_AUTH_TOKEN"
+                                    test -n "$SONAR_HOST_URL"
+                                    test -n "$SONAR_PROJECT_KEY"
+                                    test -n "$SONAR_SOURCES"
+                                    test -n "$SONAR_AUTH_TOKEN"
 
-                                if [ "\\$SONAR_PROJECT_KEY" != "ess-optimse" ]; then
-                                    echo "ERROR: Unexpected SonarQube project key."
-                                    exit 1
-                                fi
+                                    if [ "$SONAR_PROJECT_KEY" != "ess-optimse" ]; then
+                                        echo "ERROR: Unexpected SonarQube project key."
+                                        exit 1
+                                    fi
 
-                                export SONAR_TOKEN="\\$SONAR_AUTH_TOKEN"
+                                    export SONAR_TOKEN="$SONAR_AUTH_TOKEN"
 
-                                "${scannerHome}/bin/sonar-scanner" \\
-                                  -Dsonar.host.url="\\$SONAR_HOST_URL" \\
-                                  -Dsonar.projectKey="\\$SONAR_PROJECT_KEY" \\
-                                  -Dsonar.sources="\\$SONAR_SOURCES"
+                                    # Prevent accidentally using an old scan task.
+                                    rm -f .scannerwork/report-task.txt
 
-                                echo "SonarQube scanner upload completed."
-                            """
+                                    "$SCANNER_HOME/bin/sonar-scanner" \
+                                      -Dsonar.host.url="$SONAR_HOST_URL" \
+                                      -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
+                                      -Dsonar.sources="$SONAR_SOURCES"
+
+                                    test -s .scannerwork/report-task.txt
+
+                                    echo "SonarQube scanner upload completed."
+                                '''
+                            }
                         }
                     }
                 }
@@ -125,7 +132,7 @@ Jenkins
                             set -eu
                             set +x
 
-                            test -f scripts/sonarqube_report.py
+                            test -f sonarqube_report.py
                             command -v python3 >/dev/null
 
                             config=$(mktemp)
@@ -143,7 +150,8 @@ Jenkins
                             export SONAR_PROJECT_KEY
                             export SONAR_AUTH_TOKEN
 
-                            python3 scripts/sonarqube_report.py
+                            python3 sonarqube_report.py
+                            test -s sonarqube-issues-report.html
                         '''
 
                         emailext(
@@ -152,9 +160,7 @@ Jenkins
                             replyTo: 'no-reply@support.miraki.in',
                             subject: "[SonarQube Report] ESS Optimse - Build #${env.BUILD_NUMBER}",
                             mimeType: 'text/html',
-                            body: readFile(
-                                'sonarqube-issues-report.html'
-                            )
+                            body: readFile('sonarqube-issues-report.html')
                         )
                     }
                 }
@@ -168,7 +174,6 @@ Jenkins
             steps {
                 sh '''
                     set -eu
-
                     docker --version
                     docker compose version
                     docker info >/dev/null
@@ -195,7 +200,6 @@ Jenkins
                 ]) {
                     sh '''
                         set -eu
-
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -228,12 +232,11 @@ Jenkins
                         if [ -n "$conflicts" ]; then
                             echo "ERROR: Port $port is already published:"
                             printf '%s\\n' "$conflicts"
-                            echo "Stopping to avoid a port conflict."
                             exit 1
                         fi
                     done
 
-                    echo "No conflicts found on the configured ESS staging ports."
+                    echo "No conflicts found on configured staging ports."
                 '''
             }
         }
@@ -251,7 +254,6 @@ Jenkins
                 ]) {
                     sh '''
                         set -eu
-
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -270,8 +272,8 @@ Jenkins
             }
             steps {
                 input(
-                    message: 'Approve ESS staging deployment and database migrations only after verifying that ESS_DEPLOY_ENV targets the isolated staging database and the migrations have been reviewed.',
-                    ok: 'Proceed with staging deployment'
+                    message: 'Verify ESS_DEPLOY_ENV points to the isolated staging database and review migrations before proceeding.',
+                    ok: 'Approve staging deployment'
                 )
             }
         }
@@ -289,7 +291,6 @@ Jenkins
                 ]) {
                     sh '''
                         set -eu
-
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -348,7 +349,6 @@ Jenkins
                 ]) {
                     sh '''
                         set -eu
-
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -365,11 +365,11 @@ Jenkins
 
     post {
         success {
-            echo 'Pipeline completed successfully. Review SonarQube and deployment output.'
+            echo 'Pipeline completed successfully.'
         }
 
         unstable {
-            echo 'Pipeline is UNSTABLE. Review the report stage and console output.'
+            echo 'Pipeline is UNSTABLE. Check the SonarQube report stage and logs.'
         }
 
         failure {
