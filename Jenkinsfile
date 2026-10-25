@@ -1,14 +1,5 @@
-
 pipeline {
     agent any
-
-    parameters {
-        booleanParam(
-            name: 'EMAIL_TEST_ONLY',
-            defaultValue: false,
-            description: 'Checked = test email only. Unchecked = full ESS staging pipeline.'
-        )
-    }
 
     options {
         timestamps()
@@ -18,44 +9,13 @@ pipeline {
     }
 
     stages {
-        stage('Email Connectivity Test') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == true }
-            }
-            steps {
-                emailext(
-                    to: 'prasad@mirakilabs.com',
-                    from: 'no-reply@support.miraki.in',
-                    replyTo: 'no-reply@support.miraki.in',
-                    subject: "[Jenkins SMTP Test] ESS Optimse - Build #${env.BUILD_NUMBER}",
-                    mimeType: 'text/plain',
-                    body: """
-Hello,
-
-This is a Jenkins SMTP connectivity test.
-
-Job: ${env.JOB_NAME}
-Build: ${env.BUILD_NUMBER}
-
-Test mode only. No deployment stages were executed.
-"""
-                )
-            }
-        }
-
         stage('Checkout') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 checkout scm
             }
         }
 
         stage('SonarQube Analysis') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 script {
                     def scannerHome = tool 'SonarScanner'
@@ -82,10 +42,10 @@ Test mode only. No deployment stages were executed.
                                     sed 's/\\r$//' "$SONAR_CONFIG_FILE" > "$config"
                                     . "$config"
 
-                                    test -n "$SONAR_HOST_URL"
-                                    test -n "$SONAR_PROJECT_KEY"
-                                    test -n "$SONAR_SOURCES"
-                                    test -n "$SONAR_AUTH_TOKEN"
+                                    : "${SONAR_HOST_URL:?SonarQube URL is missing}"
+                                    : "${SONAR_PROJECT_KEY:?Project key is missing}"
+                                    : "${SONAR_SOURCES:?Sources are missing}"
+                                    : "${SONAR_AUTH_TOKEN:?SonarQube token is missing}"
 
                                     if [ "$SONAR_PROJECT_KEY" != "ess-optimse" ]; then
                                         echo "ERROR: Unexpected SonarQube project key."
@@ -94,7 +54,6 @@ Test mode only. No deployment stages were executed.
 
                                     export SONAR_TOKEN="$SONAR_AUTH_TOKEN"
 
-                                    # Prevent accidentally using an old scan task.
                                     rm -f .scannerwork/report-task.txt
 
                                     "$SCANNER_HOME/bin/sonar-scanner" \
@@ -104,7 +63,7 @@ Test mode only. No deployment stages were executed.
 
                                     test -s .scannerwork/report-task.txt
 
-                                    echo "SonarQube scanner upload completed."
+                                    echo "SonarQube analysis submitted successfully."
                                 '''
                             }
                         }
@@ -114,9 +73,6 @@ Test mode only. No deployment stages were executed.
         }
 
         stage('SonarQube Issue Report') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 catchError(
                     buildResult: 'UNSTABLE',
@@ -141,6 +97,10 @@ Test mode only. No deployment stages were executed.
                             sed 's/\\r$//' "$SONAR_CONFIG_FILE" > "$config"
                             . "$config"
 
+                            : "${SONAR_HOST_URL:?SonarQube URL is missing}"
+                            : "${SONAR_PROJECT_KEY:?Project key is missing}"
+                            : "${SONAR_AUTH_TOKEN:?SonarQube token is missing}"
+
                             if [ "$SONAR_PROJECT_KEY" != "ess-optimse" ]; then
                                 echo "ERROR: Report project key mismatch."
                                 exit 1
@@ -151,7 +111,10 @@ Test mode only. No deployment stages were executed.
                             export SONAR_AUTH_TOKEN
 
                             python3 sonarqube_report.py
+
                             test -s sonarqube-issues-report.html
+
+                            echo "SonarQube HTML report generated."
                         '''
 
                         emailext(
@@ -162,18 +125,18 @@ Test mode only. No deployment stages were executed.
                             mimeType: 'text/html',
                             body: readFile('sonarqube-issues-report.html')
                         )
+
+                        echo 'SonarQube report email sent to the configured recipient.'
                     }
                 }
             }
         }
 
         stage('Preflight') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 sh '''
                     set -eu
+
                     docker --version
                     docker compose version
                     docker info >/dev/null
@@ -188,9 +151,6 @@ Test mode only. No deployment stages were executed.
         }
 
         stage('Validate Compose') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 withCredentials([
                     file(
@@ -200,6 +160,7 @@ Test mode only. No deployment stages were executed.
                 ]) {
                     sh '''
                         set -eu
+
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -213,9 +174,6 @@ Test mode only. No deployment stages were executed.
         }
 
         stage('Check Deployment Ports') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 sh '''
                     set -eu
@@ -232,19 +190,17 @@ Test mode only. No deployment stages were executed.
                         if [ -n "$conflicts" ]; then
                             echo "ERROR: Port $port is already published:"
                             printf '%s\\n' "$conflicts"
+                            echo "Stopping to avoid a port conflict."
                             exit 1
                         fi
                     done
 
-                    echo "No conflicts found on configured staging ports."
+                    echo "No conflicts found on the configured staging ports."
                 '''
             }
         }
 
         stage('Build Docker Images') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 withCredentials([
                     file(
@@ -254,6 +210,7 @@ Test mode only. No deployment stages were executed.
                 ]) {
                     sh '''
                         set -eu
+
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -267,21 +224,17 @@ Test mode only. No deployment stages were executed.
         }
 
         stage('Approve Staging Deployment') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
-                input(
-                    message: 'Verify ESS_DEPLOY_ENV points to the isolated staging database and review migrations before proceeding.',
-                    ok: 'Approve staging deployment'
-                )
+                timeout(time: 15, unit: 'MINUTES') {
+                    input(
+                        message: 'Approve only after confirming ESS_DEPLOY_ENV targets the isolated staging database and migrations have been reviewed.',
+                        ok: 'Approve staging deployment'
+                    )
+                }
             }
         }
 
         stage('Apply Database Migrations') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 withCredentials([
                     file(
@@ -291,6 +244,7 @@ Test mode only. No deployment stages were executed.
                 ]) {
                     sh '''
                         set -eu
+
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -306,9 +260,6 @@ Test mode only. No deployment stages were executed.
         }
 
         stage('Deploy ESS') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 withCredentials([
                     file(
@@ -337,9 +288,6 @@ Test mode only. No deployment stages were executed.
         }
 
         stage('Seed Staging Database') {
-            when {
-                expression { params.EMAIL_TEST_ONLY == false }
-            }
             steps {
                 withCredentials([
                     file(
@@ -349,6 +297,7 @@ Test mode only. No deployment stages were executed.
                 ]) {
                     sh '''
                         set -eu
+
                         docker compose \
                           --project-name ess-optimse-jenkins \
                           --file compose.yaml \
@@ -365,15 +314,15 @@ Test mode only. No deployment stages were executed.
 
     post {
         success {
-            echo 'Pipeline completed successfully.'
+            echo 'ESS pipeline completed successfully.'
         }
 
         unstable {
-            echo 'Pipeline is UNSTABLE. Check the SonarQube report stage and logs.'
+            echo 'Pipeline is UNSTABLE. Check SonarQube report stage and logs.'
         }
 
         failure {
-            echo 'Pipeline failed. Check Console Output before retrying.'
+            echo 'Pipeline failed. Review Console Output before retrying.'
         }
 
         always {
