@@ -3,21 +3,72 @@ pipeline {
 
     options {
         timestamps()
-        // Prevent concurrent builds from deploying to the same environment.
         disableConcurrentBuilds()
         timeout(time: 60, unit: 'MINUTES')
         skipDefaultCheckout(true)
     }
 
+    parameters {
+        booleanParam(
+            name: 'EMAIL_TEST_ONLY',
+            defaultValue: true,
+            description: 'TEMPORARY: Send test email only; skip ESS deployment'
+        )
+    }
+
     stages {
+        // TEMPORARY TEST: this stage runs when EMAIL_TEST_ONLY is true.
+        stage('Email Connectivity Test') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY != false
+                }
+            }
+            steps {
+                emailext(
+                    to: 'prasad@mirakilabs.com',
+                    from: 'no-reply@support.miraki.in',
+                    replyTo: 'no-reply@support.miraki.in',
+                    subject: "[Jenkins SMTP Test] ESS Optimse - Build #${env.BUILD_NUMBER}",
+                    mimeType: 'text/plain',
+                    body: """Hello,
+
+This is a test email from the ESS Optimse Jenkins job.
+
+Job: ${env.JOB_NAME}
+Build: #${env.BUILD_NUMBER}
+Build URL: ${env.BUILD_URL}
+
+This message verifies email delivery only.
+It does not contain a SonarQube issue report.
+
+If you received this email, please confirm delivery.
+
+Regards,
+Jenkins
+"""
+                )
+            }
+        }
+
+        // Existing ESS pipeline stages run only when test mode is disabled.
         stage('Checkout') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 checkout scm
             }
         }
 
-
         stage('SonarQube Analysis') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 script {
                     def scannerHome = tool 'SonarScanner'
@@ -35,27 +86,24 @@ pipeline {
                         ) {
                             sh """
                                 set -eu
+                                set +x
 
                                 normalized_config=\$(mktemp)
                                 trap 'rm -f "\$normalized_config"' EXIT
 
-                                # Normalize Windows line endings before loading config.
                                 sed 's/\\r\$//' "\$SONAR_CONFIG_FILE" > "\$normalized_config"
-
                                 . "\$normalized_config"
 
-                                # Confirm required values exist without printing them.
                                 test -n "\$SONAR_HOST_URL"
                                 test -n "\$SONAR_PROJECT_KEY"
                                 test -n "\$SONAR_SOURCES"
                                 test -n "\$SONAR_AUTH_TOKEN"
 
-                                # Use the token provided by Jenkins credentials.
                                 export SONAR_TOKEN="\$SONAR_AUTH_TOKEN"
 
-                                "${scannerHome}/bin/sonar-scanner" \
-                                  -Dsonar.host.url="\$SONAR_HOST_URL" \
-                                  -Dsonar.projectKey="\$SONAR_PROJECT_KEY" \
+                                "${scannerHome}/bin/sonar-scanner" \\
+                                  -Dsonar.host.url="\$SONAR_HOST_URL" \\
+                                  -Dsonar.projectKey="\$SONAR_PROJECT_KEY" \\
                                   -Dsonar.sources="\$SONAR_SOURCES"
                             """
                         }
@@ -65,6 +113,11 @@ pipeline {
         }
 
         stage('Preflight') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 sh '''
                     set -eu
@@ -82,6 +135,11 @@ pipeline {
         }
 
         stage('Validate Compose') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 withCredentials([
                     file(
@@ -104,6 +162,11 @@ pipeline {
         }
 
         stage('Check Deployment Ports') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 sh '''
                     set -eu
@@ -131,6 +194,11 @@ pipeline {
         }
 
         stage('Build Docker Images') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 withCredentials([
                     file(
@@ -153,6 +221,11 @@ pipeline {
         }
 
         stage('Approve Staging Deployment') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 input(
                     message: 'Approve the ESS staging deployment and database migrations? Confirm that the target is the isolated staging database and the migration files have been reviewed.',
@@ -162,6 +235,11 @@ pipeline {
         }
 
         stage('Apply Database Migrations') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 withCredentials([
                     file(
@@ -186,6 +264,11 @@ pipeline {
         }
 
         stage('Deploy ESS') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 withCredentials([
                     file(
@@ -214,6 +297,11 @@ pipeline {
         }
 
         stage('Seed Staging Database') {
+            when {
+                expression {
+                    return params.EMAIL_TEST_ONLY == false
+                }
+            }
             steps {
                 withCredentials([
                     file(
@@ -239,11 +327,23 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed. Review deployment output and service status.'
+            script {
+                if (params.EMAIL_TEST_ONLY != false) {
+                    echo 'Email test step completed. Check the recipient Outlook inbox.'
+                } else {
+                    echo 'ESS pipeline completed. Review deployment output and service status.'
+                }
+            }
         }
 
         failure {
-            echo 'Pipeline failed. Check Console Output before retrying.'
+            script {
+                if (params.EMAIL_TEST_ONLY != false) {
+                    echo 'Email test failed. Check Console Output and Mailcow SMTP settings.'
+                } else {
+                    echo 'Pipeline failed. Check Console Output before retrying.'
+                }
+            }
         }
 
         always {
