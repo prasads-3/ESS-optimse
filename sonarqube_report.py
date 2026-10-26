@@ -1,7 +1,6 @@
 import os
 import json
 import time
-import csv
 import html
 import urllib.parse
 import urllib.request
@@ -36,6 +35,7 @@ def esc(value):
 
 
 def get_file_path(component, project_key):
+    component = str(component or "")
     prefix = project_key + ":"
     if component.startswith(prefix):
         return component[len(prefix):]
@@ -92,6 +92,24 @@ def type_label(value):
         "CODE_SMELL": "Code Smell",
         "SECURITY_HOTSPOT": "Security Hotspot",
     }.get(str(value or ""), str(value or "Unknown"))
+
+
+def issue_open_link(issue, dashboard_host, project_key):
+    """Return a safe, clickable link to a specific SonarQube issue when possible."""
+    issue_key = str(issue.get("key") or "").strip()
+    if not issue_key:
+        return SafeHtml('<span style="color:#94A3B8;">Not available</span>')
+    url = (
+        dashboard_host.rstrip("/") + "/project/issues?id="
+        + urllib.parse.quote(project_key, safe="")
+        + "&open=" + urllib.parse.quote(issue_key, safe="")
+    )
+    return SafeHtml(
+        '<a href="' + esc(url) + '" style="display:inline-block;padding:4px 8px;'
+        'border:1px solid #BFDBFE;background-color:#EFF6FF;color:#1D4ED8;'
+        'font-family:Arial,sans-serif;font-size:11px;font-weight:bold;'
+        'text-decoration:none;white-space:nowrap;">View issue</a>'
+    )
 
 
 def make_table(headers, rows, widths=None, row_html=False):
@@ -152,12 +170,21 @@ def metric_card(label, value, accent="#1D4ED8", note=""):
 
 
 def section_heading(title, subtitle=""):
+    anchor_ids = {
+        "Quality distribution": "quality-distribution",
+        "Project metrics": "project-metrics",
+        "Priority findings": "priority-findings",
+        "Complete issue register": "issue-register",
+        "Security hotspots": "security-hotspots",
+    }
+    anchor_id = anchor_ids.get(title, "")
+    anchor_attr = f' id="{anchor_id}"' if anchor_id else ""
     subtitle_html = (
         '<div style="font-family:Arial,sans-serif;color:#64748B;font-size:12px;'
         'line-height:1.5;margin-top:4px;">' + esc(subtitle) + '</div>'
     ) if subtitle else ""
     return (
-        '<h2 style="font-family:Arial,sans-serif;font-size:17px;line-height:1.3;'
+        '<h2' + anchor_attr + ' style="font-family:Arial,sans-serif;font-size:17px;line-height:1.3;'
         'color:#14243A;margin:26px 0 5px;padding:0;">' + esc(title) + '</h2>' +
         subtitle_html + '<div style="height:3px;width:42px;background-color:#168653;'
         'margin:10px 0 12px;font-size:1px;line-height:1px;">&nbsp;</div>'
@@ -395,7 +422,8 @@ def main():
             issue.get("line", "—"),
             issue.get("message", ""),
             issue.get("rule", ""),
-            issue.get("status", "")
+            issue.get("status", ""),
+            issue_open_link(issue, dashboard_host, project)
         ])
 
     issue_rows = []
@@ -408,7 +436,8 @@ def main():
             issue.get("line", "—"),
             issue.get("message", ""),
             issue.get("rule", ""),
-            issue.get("status", "")
+            issue.get("status", ""),
+            issue_open_link(issue, dashboard_host, project)
         ])
 
     hotspot_rows = []
@@ -563,6 +592,23 @@ def main():
         for index in range(0, len(cards), 4)
     )
 
+    navigation_html = (
+        '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
+        'style="width:100%;margin:0 0 16px;border:1px solid #D9E2EC;background-color:#FFFFFF;">'
+        '<tr><td style="padding:11px 13px;font-family:Arial,sans-serif;font-size:10px;'
+        'font-weight:bold;letter-spacing:.5px;color:#64748B;white-space:nowrap;">REPORT SECTIONS</td>'
+        '<td style="padding:11px 5px;"><a href="#quality-distribution" style="font-family:Arial,sans-serif;'
+        'font-size:11px;font-weight:bold;color:#1D4ED8;text-decoration:none;">Distribution</a></td>'
+        '<td style="padding:11px 5px;"><a href="#project-metrics" style="font-family:Arial,sans-serif;'
+        'font-size:11px;font-weight:bold;color:#1D4ED8;text-decoration:none;">Metrics</a></td>'
+        '<td style="padding:11px 5px;"><a href="#priority-findings" style="font-family:Arial,sans-serif;'
+        'font-size:11px;font-weight:bold;color:#1D4ED8;text-decoration:none;">Priority findings</a></td>'
+        '<td style="padding:11px 5px;"><a href="#issue-register" style="font-family:Arial,sans-serif;'
+        'font-size:11px;font-weight:bold;color:#1D4ED8;text-decoration:none;">All issues</a></td>'
+        '<td style="padding:11px 13px 11px 5px;"><a href="#security-hotspots" style="font-family:Arial,sans-serif;'
+        'font-size:11px;font-weight:bold;color:#1D4ED8;text-decoration:none;">Hotspots</a></td></tr></table>'
+    )
+
     logo_html = (
         '<img src="' + LOGO_DATA_URI + '" alt="Miraki Labs" width="190" '
         'style="display:block;width:190px;max-width:100%;height:auto;border:0;outline:none;'
@@ -575,11 +621,11 @@ def main():
     report = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Miraki Labs | ESS Optimse Code Quality Report</title></head>
+<title>Miraki Labs | ESS Optimse Engineering Quality Intelligence</title></head>
 <body style="margin:0;padding:0;background-color:#EEF2F7;">
 <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;background-color:#EEF2F7;">
 <tr><td align="center" style="padding:18px 8px;">
-<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;max-width:1160px;background-color:#FFFFFF;border:1px solid #D9E2EC;border-collapse:separate;">
+<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;max-width:1240px;background-color:#FFFFFF;border:1px solid #D9E2EC;border-collapse:separate;">
 <tr><td style="padding:18px 24px;background-color:#FFFFFF;border-bottom:1px solid #E4EAF1;">
 <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0"><tr>
 <td valign="middle" style="padding:0 14px 0 0;">{logo_html}<div style="font-family:Arial,sans-serif;font-size:9px;letter-spacing:1.2px;color:#64748B;margin-top:5px;">BUILD&nbsp;&bull;&nbsp;SECURE&nbsp;&bull;&nbsp;DELIVER</div></td>
@@ -604,6 +650,7 @@ def main():
 </tr></table>
 </td></tr>
 <tr><td style="padding:22px 22px 7px;background-color:#F7F9FC;">
+{navigation_html}
 <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0"><tr>
 <td width="60%" valign="top" style="width:60%;padding:0 7px 10px 0;">
 <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width:100%;background-color:#FFFFFF;border:1px solid #D9E2EC;"><tr><td style="padding:17px 18px;">
@@ -636,10 +683,10 @@ def main():
 {make_table(['Measure', 'Value'], metric_rows, widths=['62%', '38%'])}
 <p style="font-family:Arial,sans-serif;font-size:11px;color:#B45309;line-height:1.6;margin:10px 0;">{esc(measures_note)}</p>
 {section_heading('Priority findings', 'The highest severity findings appear first. This section shows up to 25 Blocker, Critical and Major issues for quick triage.')}
-{make_table(['Severity', 'Type', 'File', 'Line', 'Finding', 'Rule', 'Status'], priority_rows, widths=['9%', '10%', '19%', '5%', '34%', '13%', '10%'], row_html=True)}
+{make_table(['Severity', 'Type', 'File', 'Line', 'Finding', 'Rule', 'Status', 'Details'], priority_rows, widths=['9%', '9%', '18%', '5%', '30%', '12%', '9%', '8%'], row_html=True)}
 <p style="font-family:Arial,sans-serif;font-size:11px;color:#64748B;line-height:1.6;margin:10px 0 18px;">Showing {len(priority_issues)} priority findings here. The complete issue register below includes every issue record returned by the API ({len(issues):,} total).</p>
 {section_heading('Complete issue register', f'{len(issues):,} issues retrieved — every returned issue is listed, sorted from highest to lower severity.')}
-{make_table(['Type', 'Severity', 'File', 'Line', 'Message', 'Rule', 'Status'], issue_rows, widths=['10%', '9%', '20%', '5%', '32%', '14%', '10%'], row_html=True)}
+{make_table(['Type', 'Severity', 'File', 'Line', 'Message', 'Rule', 'Status', 'Details'], issue_rows, widths=['9%', '8%', '19%', '5%', '29%', '12%', '9%', '9%'], row_html=True)}
 {section_heading('Security hotspots', f'{len(hotspots):,} hotspots retrieved from the separate security-hotspot API.' if not hotspot_note else 'Hotspot retrieval could not be confirmed; this must not be interpreted as zero hotspots.')}
 {make_table(['Type', 'Risk', 'File', 'Line', 'Message', 'Rule', 'Status'], hotspot_rows, widths=['12%', '10%', '20%', '5%', '30%', '13%', '10%'])}
 <p style="font-family:Arial,sans-serif;font-size:12px;color:#B45309;line-height:1.6;margin:12px 0;">{esc(hotspot_note)}</p>
@@ -653,120 +700,10 @@ def main():
 <p style="font-family:Arial,sans-serif;font-size:10px;line-height:1.6;color:#94A3B8;margin:12px 0 0;">Counts reflect data successfully retrieved from SonarQube. Security Hotspots use a separate endpoint; retrieval failure is displayed as unavailable and must not be interpreted as zero. Review critical findings and confirm fixes in the source repository.</p>
 </td></tr></table></td></tr></table></body></html>"""
 
-    # CSV: one row per retrieved issue, with fields suitable for Excel filtering.
-    csv_path = Path("sonarqube-issues-report.csv")
-    with csv_path.open("w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[
-            "key", "type", "severity", "status", "resolution", "message",
-            "file_path", "line", "rule", "effort", "creation_date", "update_date",
-            "assignee", "issue_url"
-        ])
-        writer.writeheader()
-        for issue in issues:
-            issue_key = issue.get("key", "")
-            writer.writerow({
-                "key": issue_key,
-                "type": type_label(issue.get("type")),
-                "severity": issue.get("severity", "Unknown"),
-                "status": issue.get("status", ""),
-                "resolution": issue.get("resolution", ""),
-                "message": issue.get("message", ""),
-                "file_path": get_file_path(issue.get("component", ""), project),
-                "line": issue.get("line", ""),
-                "rule": issue.get("rule", ""),
-                "effort": issue.get("effort", ""),
-                "creation_date": issue.get("creationDate", ""),
-                "update_date": issue.get("updateDate", ""),
-                "assignee": issue.get("assignee", ""),
-                "issue_url": dashboard_host + "/project/issues?id=" + urllib.parse.quote(project, safe="") + "&open=" + urllib.parse.quote(issue_key, safe="") if issue_key else issues_url,
-            })
-
-    # CSV for hotspots is separate because hotspots are not ordinary issues.
-    hotspot_csv_path = Path("sonarqube-security-hotspots.csv")
-    with hotspot_csv_path.open("w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[
-            "key", "status", "risk", "message", "file_path", "line", "rule"
-        ])
-        writer.writeheader()
-        for hotspot in hotspots:
-            writer.writerow({
-                "key": hotspot.get("key", ""),
-                "status": hotspot.get("status", ""),
-                "risk": hotspot.get("vulnerabilityProbability", ""),
-                "message": hotspot.get("message", ""),
-                "file_path": get_file_path(hotspot.get("component", ""), project),
-                "line": hotspot.get("line", ""),
-                "rule": hotspot.get("ruleKey", ""),
-            })
-
-    # PDF: generate a multipage management report with the full issue appendix.
-    # Jenkins should install reportlab before running this script.
-    try:
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import landscape, A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.enums import TA_LEFT
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-        from reportlab.lib.units import mm
-
-        pdf_path = Path("sonarqube-issues-report.pdf")
-        doc = SimpleDocTemplate(
-            str(pdf_path), pagesize=landscape(A4), rightMargin=12*mm,
-            leftMargin=12*mm, topMargin=14*mm, bottomMargin=14*mm,
-            title="Miraki Labs - ESS Optimse Code Quality Report",
-            author="Miraki Labs Jenkins"
-        )
-        styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], textColor=colors.HexColor("#14243A"), alignment=TA_LEFT, fontSize=20, leading=24, spaceAfter=5))
-        styles.add(ParagraphStyle(name="SmallCell", parent=styles["BodyText"], fontName="Helvetica", fontSize=7, leading=8.5, wordWrap="CJK"))
-        styles.add(ParagraphStyle(name="SmallCellBold", parent=styles["SmallCell"], fontName="Helvetica-Bold", textColor=colors.HexColor("#14243A")))
-        styles.add(ParagraphStyle(name="SectionTitle", parent=styles["Heading2"], textColor=colors.HexColor("#1D4ED8"), spaceBefore=10, spaceAfter=5))
-        story = [Paragraph("MIRAKI LABS", styles["Heading1"]), Paragraph("ESS Optimse — Code Quality &amp; Security Report", styles["ReportTitle"]),
-                 Paragraph(f"Generated: {esc(generated_at)} | Build: {esc(os.environ.get('BUILD_NUMBER', 'Not provided'))} | Branch: {esc(os.environ.get('GIT_BRANCH', 'Not provided'))}", styles["BodyText"]),
-                 Spacer(1, 5*mm), Paragraph(f"Quality Gate: <b>{esc(gate_label)}</b>", styles["Heading2"]),
-                 Paragraph(f"Issues retrieved: <b>{len(issues)}</b> &nbsp; Bugs: <b>{types.get('BUG', 0)}</b> &nbsp; Vulnerabilities: <b>{types.get('VULNERABILITY', 0)}</b> &nbsp; Code Smells: <b>{types.get('CODE_SMELL', 0)}</b> &nbsp; Hotspots retrieved: <b>{len(hotspots)}</b>", styles["BodyText"]),
-                 Spacer(1, 4*mm), Paragraph("Dashboard measures", styles["SectionTitle"])]
-        metric_pdf_data = [[Paragraph("Measure", styles["SmallCellBold"]), Paragraph("Value", styles["SmallCellBold"])]]
-        for label, value in metric_rows:
-            metric_pdf_data.append([Paragraph(esc(label), styles["SmallCell"]), Paragraph(esc(value), styles["SmallCell"])])
-        mt = Table(metric_pdf_data, colWidths=[75*mm, 55*mm], repeatRows=1)
-        mt.setStyle(TableStyle([("BACKGROUND", (0,0),(-1,0),colors.HexColor("#EAF0F6")),("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#D8E1EA")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-        story += [mt, Spacer(1, 4*mm), Paragraph("Priority findings", styles["SectionTitle"])]
-        def pdf_table(headers, rows, widths):
-            data = [[Paragraph(esc(h), styles["SmallCellBold"]) for h in headers]]
-            for row in rows:
-                data.append([Paragraph(esc(v if not isinstance(v, SafeHtml) else str(v).replace('<','&lt;').replace('>','&gt;')), styles["SmallCell"]) for v in row])
-            t = Table(data, colWidths=widths, repeatRows=1, hAlign="LEFT")
-            t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#EAF0F6")),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#D8E1EA")),("VALIGN",(0,0),(-1,-1),"TOP"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F8FAFC")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-            return t
-        story.append(pdf_table(["Severity", "Type", "File", "Line", "Finding", "Rule", "Status"], [[i.get("severity","Unknown"), type_label(i.get("type")), get_file_path(i.get("component",""),project), i.get("line","—"), i.get("message",""), i.get("rule",""), i.get("status","")] for i in priority_issues], [22*mm,25*mm,42*mm,12*mm,88*mm,28*mm,20*mm]))
-        story += [PageBreak(), Paragraph(f"Complete Issue Register — {len(issues)} issues", styles["SectionTitle"]),
-                  Paragraph("Every issue retrieved from the SonarQube issue-search API is listed below. CSV contains the same issue records for filtering in Excel.", styles["BodyText"]), Spacer(1, 3*mm)]
-        full_rows = [[type_label(i.get("type")), i.get("severity","Unknown"), get_file_path(i.get("component",""),project), i.get("line","—"), i.get("message",""), i.get("rule",""), i.get("status","")] for i in issues]
-        story.append(pdf_table(["Type", "Severity", "File", "Line", "Message", "Rule", "Status"], full_rows, [22*mm,20*mm,42*mm,12*mm,91*mm,28*mm,22*mm]))
-        story += [PageBreak(), Paragraph(f"Security Hotspots — {len(hotspots)} retrieved", styles["SectionTitle"])]
-        if hotspot_note:
-            story.append(Paragraph(esc(hotspot_note), styles["BodyText"]))
-        hotspot_pdf_rows = [["Hotspot", h.get("vulnerabilityProbability","—"), get_file_path(h.get("component",""),project), h.get("line","—"), h.get("message",""), h.get("ruleKey",""), h.get("status","")] for h in hotspots]
-        story.append(pdf_table(["Type", "Risk", "File", "Line", "Message", "Rule", "Status"], hotspot_pdf_rows, [20*mm,18*mm,42*mm,12*mm,93*mm,30*mm,22*mm]))
-        if quality_gate_note:
-            story += [Spacer(1, 4*mm), Paragraph("Quality Gate diagnostic: " + esc(quality_gate_note), styles["BodyText"])]
-        if measures_note:
-            story += [Spacer(1, 3*mm), Paragraph("Metrics diagnostic: " + esc(measures_note), styles["BodyText"])]
-        def footer(canvas, document):
-            canvas.saveState()
-            canvas.setFillColor(colors.HexColor("#64748B"))
-            canvas.setFont("Helvetica", 7)
-            canvas.drawString(12*mm, 7*mm, "Miraki Labs | ESS Optimse | Generated by Jenkins + SonarQube")
-            canvas.drawRightString(landscape(A4)[0]-12*mm, 7*mm, f"Page {document.page}")
-            canvas.restoreState()
-        doc.build(story, onFirstPage=footer, onLaterPages=footer)
-    except ImportError as error:
-        raise RuntimeError("PDF generation requires ReportLab. Install it in the Jenkins report stage with: python -m pip install reportlab") from error
-
+    # UI-only mode: generate the HTML report only. PDF/CSV downloads are intentionally deferred.
     Path("sonarqube-issues-report.html").write_text(report, encoding="utf-8")
     print(
-        "Professional SonarQube reports generated: HTML, PDF, issue CSV, and hotspot CSV. "
+        "Professional SonarQube HTML report generated (UI-only; no download files). "
         f"Project={project}, Issues={len(issues)}, Hotspots={len(hotspots)}, "
         f"QualityGate={quality_gate}."
     )
